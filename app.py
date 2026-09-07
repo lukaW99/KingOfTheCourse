@@ -235,7 +235,7 @@ def score_based_fine(points: float) -> float:
         return 20
     elif points < 30:
         return 10
-    elif points > 40:
+    elif points >= 40:
         return -10
     return 0
 
@@ -497,27 +497,41 @@ elif page == "History":
                 if (count := row.get(col, 0)) > 0
             )
             date_str = row["round_date"].strftime("%d %b")
-            st.markdown(
-                f"""
-                <div style="display:flex;justify-content:space-between;align-items:center;
-                            padding:12px 0;border-bottom:1px solid #DAD4C4;">
-                    <div style="width:70px;">
-                        <div style="font-size:12.5px;color:#5B6259;">{date_str}</div>
-                        <div style="font-size:12px;color:#5B6259;">{row['course']}</div>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:10px;flex:1;">
-                        {avatar_html}
-                        <div>
-                            <div class="player-name">{row['name']}</div>
-                            {f'<div style="font-size:11.5px;color:#5B6259;">{behav_notes}</div>' if behav_notes else ''}
+            row_col, del_col = st.columns([9, 1])
+            with row_col:
+                st.markdown(
+                    f"""
+                    <div style="display:flex;justify-content:space-between;align-items:center;
+                                padding:12px 0;border-bottom:1px solid #DAD4C4;">
+                        <div style="width:70px;">
+                            <div style="font-size:12.5px;color:#5B6259;">{date_str}</div>
+                            <div style="font-size:12px;color:#5B6259;">{row['course']}</div>
                         </div>
+                        <div style="display:flex;align-items:center;gap:10px;flex:1;">
+                            {avatar_html}
+                            <div>
+                                <div class="player-name">{row['name']}</div>
+                                {f'<div style="font-size:11.5px;color:#5B6259;">{behav_notes}</div>' if behav_notes else ''}
+                            </div>
+                        </div>
+                        <div class="avg-num" style="width:40px;">{row['points']}</div>
+                        <div style="width:50px;text-align:right;">{tag}</div>
                     </div>
-                    <div class="avg-num" style="width:40px;">{row['points']}</div>
-                    <div style="width:50px;text-align:right;">{tag}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with del_col:
+                confirm_key = f"confirm_del_round_{row['id']}"
+                if st.session_state.get(confirm_key):
+                    if st.button("Confirm", key=f"confirm_btn_{row['id']}"):
+                        supabase.table("rounds").delete().eq("id", row["id"]).execute()
+                        clear_caches()
+                        st.session_state.pop(confirm_key, None)
+                        st.rerun()
+                else:
+                    if st.button("🗑️", key=f"del_btn_{row['id']}"):
+                        st.session_state[confirm_key] = True
+                        st.rerun()
 
 # ---------------------------------------------------------------------------
 # PAGE: FINES & KITTY
@@ -650,7 +664,7 @@ elif page == "Players":
     else:
         for _, p in players_df.iterrows():
             avatar_html = render_avatar(p["name"], p.get("photo_url"), p["id"])
-            col1, col2 = st.columns([3, 2])
+            col1, col2, col3 = st.columns([3, 2, 1])
             with col1:
                 st.markdown(
                     f"""
@@ -672,3 +686,17 @@ elif page == "Players":
                     clear_caches()
                     st.success("Photo updated.")
                     st.rerun()
+            with col3:
+                confirm_key = f"confirm_del_player_{p['id']}"
+                if st.session_state.get(confirm_key):
+                    round_count = len(rounds_df[rounds_df["player_id"] == p["id"]]) if not rounds_df.empty else 0
+                    st.caption(f"Deletes {round_count} round(s) too")
+                    if st.button("Confirm", key=f"confirm_pbtn_{p['id']}"):
+                        supabase.table("players").delete().eq("id", p["id"]).execute()
+                        clear_caches()
+                        st.session_state.pop(confirm_key, None)
+                        st.rerun()
+                else:
+                    if st.button("🗑️", key=f"del_pbtn_{p['id']}"):
+                        st.session_state[confirm_key] = True
+                        st.rerun()
