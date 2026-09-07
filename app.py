@@ -12,7 +12,7 @@ import uuid
 import io
 import base64
 from PIL import Image, ImageOps
-from streamlit_cropperjs import st_cropperjs
+from streamlit_cropper import st_cropper
 
 # ---------------------------------------------------------------------------
 # PAGE CONFIG + THEME
@@ -683,11 +683,18 @@ elif page == "Players":
         new_photo = st.file_uploader("Profile photo (optional)", type=["jpg", "jpeg", "png"], key="new_player_photo")
         new_photo_cropped = None
         if new_photo:
-            st.caption("Drag to reposition, pinch or use the corner handles to resize, then tap the button below")
+            st.caption("Drag the square to frame the shot — it'll show as a circle below, so keep faces centered")
             raw_bytes = new_photo.getvalue()
-            crop_result = st_cropperjs(pic=raw_bytes, btn_text="Use this framing", key="new_player_cropper")
-            if crop_result:
-                new_photo_cropped = crop_to_square_bytes(crop_result)
+            src_img = Image.open(io.BytesIO(raw_bytes))
+            src_img = ImageOps.exif_transpose(src_img).convert("RGB")
+            cropped_img = st_cropper(
+                src_img, realtime_update=True, box_color="#C9A227",
+                aspect_ratio=(1, 1), return_type="image", key="new_player_cropper",
+            )
+            if cropped_img:
+                buf = io.BytesIO()
+                cropped_img.resize((400, 400)).save(buf, format="JPEG", quality=90)
+                new_photo_cropped = buf.getvalue()
                 st.markdown(render_circle_preview(new_photo_cropped), unsafe_allow_html=True)
                 st.caption("This is how it'll appear as their avatar")
         if st.button("Add player"):
@@ -732,10 +739,17 @@ elif page == "Players":
                 )
                 if update_photo:
                     raw_bytes = update_photo.getvalue()
-                    st.caption("Drag, pinch, or use the handles to frame it")
-                    crop_result = st_cropperjs(pic=raw_bytes, btn_text="Use this framing", key=f"cropper_{p['id']}")
-                    if crop_result:
-                        update_cropped = crop_to_square_bytes(crop_result)
+                    st.caption("Drag the square to frame it")
+                    src_img = Image.open(io.BytesIO(raw_bytes))
+                    src_img = ImageOps.exif_transpose(src_img).convert("RGB")
+                    cropped_img = st_cropper(
+                        src_img, realtime_update=True, box_color="#C9A227",
+                        aspect_ratio=(1, 1), return_type="image", key=f"cropper_{p['id']}",
+                    )
+                    if cropped_img:
+                        buf = io.BytesIO()
+                        cropped_img.resize((400, 400)).save(buf, format="JPEG", quality=90)
+                        update_cropped = buf.getvalue()
                         st.markdown(render_circle_preview(update_cropped, size=80), unsafe_allow_html=True)
                         if st.button("Save photo", key=f"save_photo_{p['id']}"):
                             photo_url = upload_photo_bytes(PROFILE_BUCKET, update_cropped, p["name"].replace(" ", "_"))
