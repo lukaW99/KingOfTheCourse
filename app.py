@@ -9,6 +9,9 @@ import pandas as pd
 from datetime import date
 from supabase import create_client, Client
 import uuid
+import io
+import base64
+from PIL import Image
 
 # ---------------------------------------------------------------------------
 # PAGE CONFIG + THEME
@@ -105,6 +108,7 @@ h1, h2, h3 {
     font-size: 14px;
     flex-shrink: 0;
 }
+img.avatar { object-fit: cover; }
 
 .player-name { font-weight: 600; font-size: 16px; color: var(--ink); }
 .player-meta { font-size: 12.5px; color: var(--ink-soft); }
@@ -326,6 +330,35 @@ def build_fines_summary(players_df, rounds_df, monthly_df):
 # ---------------------------------------------------------------------------
 # STORAGE HELPERS
 # ---------------------------------------------------------------------------
+
+def crop_to_square_bytes(uploaded_file) -> bytes:
+    """Center-crop an uploaded image to a square, so it always fits a circle cleanly."""
+    img = Image.open(uploaded_file)
+    img = img.convert("RGB")
+    w, h = img.size
+    side = min(w, h)
+    left = (w - side) // 2
+    top = (h - side) // 2
+    cropped = img.crop((left, top, left + side, top + side))
+    buf = io.BytesIO()
+    cropped.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+def render_circle_preview(image_bytes: bytes, size: int = 120) -> str:
+    """Return an HTML <img> tag showing exactly how a cropped photo will look as an avatar."""
+    b64 = base64.b64encode(image_bytes).decode()
+    return (
+        f'<img src="data:image/jpeg;base64,{b64}" '
+        f'style="width:{size}px;height:{size}px;border-radius:50%;object-fit:cover;'
+        f'border:2px solid #C9A227;display:block;margin:0 auto;" />'
+    )
+
+def upload_photo_bytes(bucket: str, file_bytes: bytes, path_prefix: str, ext: str = "jpg") -> str:
+    path = f"{path_prefix}_{uuid.uuid4().hex[:8]}.{ext}"
+    supabase.storage.from_(bucket).upload(
+        path, file_bytes, {"content-type": "image/jpeg"}
+    )
+    return supabase.storage.from_(bucket).get_public_url(path)
 
 def upload_photo(bucket: str, file, path_prefix: str) -> str:
     ext = file.name.split(".")[-1]
@@ -640,6 +673,11 @@ elif page == "Players":
     with st.expander("+ Add a mate"):
         new_name = st.text_input("Name")
         new_photo = st.file_uploader("Profile photo (optional)", type=["jpg", "jpeg", "png"], key="new_player_photo")
+        new_photo_cropped = None
+        if new_photo:
+            new_photo_cropped = crop_to_square_bytes(new_photo)
+            st.markdown(render_circle_preview(new_photo_cropped), unsafe_allow_html=True)
+            st.caption("This is how it'll appear as their avatar")
         if st.button("Add player"):
             if not new_name.strip():
                 st.error("Enter a name.")
@@ -647,8 +685,8 @@ elif page == "Players":
                 st.error("That player already exists.")
             else:
                 photo_url = None
-                if new_photo:
-                    photo_url = upload_photo(PROFILE_BUCKET, new_photo, new_name.strip().replace(" ", "_"))
+                if new_photo_cropped:
+                    photo_url = upload_photo_bytes(PROFILE_BUCKET, new_photo_cropped, new_name.strip().replace(" ", "_"))
                 supabase.table("players").insert({
                     "name": new_name.strip(),
                     "photo_url": photo_url,
@@ -681,11 +719,14 @@ elif page == "Players":
                     key=f"update_{p['id']}", label_visibility="collapsed"
                 )
                 if update_photo:
-                    photo_url = upload_photo(PROFILE_BUCKET, update_photo, p["name"].replace(" ", "_"))
-                    supabase.table("players").update({"photo_url": photo_url}).eq("id", p["id"]).execute()
-                    clear_caches()
-                    st.success("Photo updated.")
-                    st.rerun()
+                    update_cropped = crop_to_square_bytes(update_photo)
+                    st.markdown(render_circle_preview(update_cropped, size=80), unsafe_allow_html=True)
+                    if st.button("Save photo", key=f"save_photo_{p['id']}"):
+                        photo_url = upload_photo_bytes(PROFILE_BUCKET, update_cropped, p["name"].replace(" ", "_"))
+                        supabase.table("players").update({"photo_url": photo_url}).eq("id", p["id"]).execute()
+                        clear_caches()
+                        st.success("Photo updated.")
+                        st.rerun()
             with col3:
                 confirm_key = f"confirm_del_player_{p['id']}"
                 if st.session_state.get(confirm_key):
