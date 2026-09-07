@@ -11,7 +11,7 @@ from supabase import create_client, Client
 import uuid
 import io
 import base64
-from PIL import Image
+from PIL import Image, ImageOps
 
 # ---------------------------------------------------------------------------
 # PAGE CONFIG + THEME
@@ -331,15 +331,22 @@ def build_fines_summary(players_df, rounds_df, monthly_df):
 # STORAGE HELPERS
 # ---------------------------------------------------------------------------
 
-def crop_to_square_bytes(uploaded_file) -> bytes:
-    """Center-crop an uploaded image to a square, so it always fits a circle cleanly."""
-    img = Image.open(uploaded_file)
+def crop_to_square_bytes(image_bytes: bytes, zoom: float = 1.0, x_pct: float = 50, y_pct: float = 50) -> bytes:
+    """Crop an image to a square using adjustable zoom and position, so it always fits a circle cleanly.
+    zoom: 1.0 = widest possible square, higher = more zoomed in.
+    x_pct / y_pct: 0-100, where the crop window sits within the image."""
+    img = Image.open(io.BytesIO(image_bytes))
+    img = ImageOps.exif_transpose(img)
     img = img.convert("RGB")
     w, h = img.size
-    side = min(w, h)
-    left = (w - side) // 2
-    top = (h - side) // 2
+    base_side = min(w, h)
+    side = max(20, int(base_side / zoom))
+    max_left = w - side
+    max_top = h - side
+    left = int(max_left * (x_pct / 100))
+    top = int(max_top * (y_pct / 100))
     cropped = img.crop((left, top, left + side, top + side))
+    cropped = cropped.resize((400, 400))
     buf = io.BytesIO()
     cropped.save(buf, format="JPEG", quality=90)
     return buf.getvalue()
@@ -675,7 +682,11 @@ elif page == "Players":
         new_photo = st.file_uploader("Profile photo (optional)", type=["jpg", "jpeg", "png"], key="new_player_photo")
         new_photo_cropped = None
         if new_photo:
-            new_photo_cropped = crop_to_square_bytes(new_photo)
+            raw_bytes = new_photo.getvalue()
+            zoom = st.slider("Zoom", 1.0, 3.0, 1.0, 0.1, key="new_player_zoom")
+            x_pct = st.slider("Move left / right", 0, 100, 50, key="new_player_x")
+            y_pct = st.slider("Move up / down", 0, 100, 50, key="new_player_y")
+            new_photo_cropped = crop_to_square_bytes(raw_bytes, zoom, x_pct, y_pct)
             st.markdown(render_circle_preview(new_photo_cropped), unsafe_allow_html=True)
             st.caption("This is how it'll appear as their avatar")
         if st.button("Add player"):
@@ -719,7 +730,11 @@ elif page == "Players":
                     key=f"update_{p['id']}", label_visibility="collapsed"
                 )
                 if update_photo:
-                    update_cropped = crop_to_square_bytes(update_photo)
+                    raw_bytes = update_photo.getvalue()
+                    u_zoom = st.slider("Zoom", 1.0, 3.0, 1.0, 0.1, key=f"zoom_{p['id']}")
+                    u_x = st.slider("Move left / right", 0, 100, 50, key=f"x_{p['id']}")
+                    u_y = st.slider("Move up / down", 0, 100, 50, key=f"y_{p['id']}")
+                    update_cropped = crop_to_square_bytes(raw_bytes, u_zoom, u_x, u_y)
                     st.markdown(render_circle_preview(update_cropped, size=80), unsafe_allow_html=True)
                     if st.button("Save photo", key=f"save_photo_{p['id']}"):
                         photo_url = upload_photo_bytes(PROFILE_BUCKET, update_cropped, p["name"].replace(" ", "_"))
