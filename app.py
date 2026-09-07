@@ -12,6 +12,7 @@ import uuid
 import io
 import base64
 from PIL import Image, ImageOps
+from streamlit_cropperjs import st_cropperjs
 
 # ---------------------------------------------------------------------------
 # PAGE CONFIG + THEME
@@ -682,13 +683,13 @@ elif page == "Players":
         new_photo = st.file_uploader("Profile photo (optional)", type=["jpg", "jpeg", "png"], key="new_player_photo")
         new_photo_cropped = None
         if new_photo:
+            st.caption("Drag to reposition, pinch or use the corner handles to resize, then tap the button below")
             raw_bytes = new_photo.getvalue()
-            zoom = st.slider("Zoom", 1.0, 3.0, 1.0, 0.1, key="new_player_zoom")
-            x_pct = st.slider("Move left / right", 0, 100, 50, key="new_player_x")
-            y_pct = st.slider("Move up / down", 0, 100, 50, key="new_player_y")
-            new_photo_cropped = crop_to_square_bytes(raw_bytes, zoom, x_pct, y_pct)
-            st.markdown(render_circle_preview(new_photo_cropped), unsafe_allow_html=True)
-            st.caption("This is how it'll appear as their avatar")
+            crop_result = st_cropperjs(pic=raw_bytes, btn_text="Use this framing", key="new_player_cropper")
+            if crop_result:
+                new_photo_cropped = crop_to_square_bytes(crop_result)
+                st.markdown(render_circle_preview(new_photo_cropped), unsafe_allow_html=True)
+                st.caption("This is how it'll appear as their avatar")
         if st.button("Add player"):
             if not new_name.strip():
                 st.error("Enter a name.")
@@ -731,17 +732,17 @@ elif page == "Players":
                 )
                 if update_photo:
                     raw_bytes = update_photo.getvalue()
-                    u_zoom = st.slider("Zoom", 1.0, 3.0, 1.0, 0.1, key=f"zoom_{p['id']}")
-                    u_x = st.slider("Move left / right", 0, 100, 50, key=f"x_{p['id']}")
-                    u_y = st.slider("Move up / down", 0, 100, 50, key=f"y_{p['id']}")
-                    update_cropped = crop_to_square_bytes(raw_bytes, u_zoom, u_x, u_y)
-                    st.markdown(render_circle_preview(update_cropped, size=80), unsafe_allow_html=True)
-                    if st.button("Save photo", key=f"save_photo_{p['id']}"):
-                        photo_url = upload_photo_bytes(PROFILE_BUCKET, update_cropped, p["name"].replace(" ", "_"))
-                        supabase.table("players").update({"photo_url": photo_url}).eq("id", p["id"]).execute()
-                        clear_caches()
-                        st.success("Photo updated.")
-                        st.rerun()
+                    st.caption("Drag, pinch, or use the handles to frame it")
+                    crop_result = st_cropperjs(pic=raw_bytes, btn_text="Use this framing", key=f"cropper_{p['id']}")
+                    if crop_result:
+                        update_cropped = crop_to_square_bytes(crop_result)
+                        st.markdown(render_circle_preview(update_cropped, size=80), unsafe_allow_html=True)
+                        if st.button("Save photo", key=f"save_photo_{p['id']}"):
+                            photo_url = upload_photo_bytes(PROFILE_BUCKET, update_cropped, p["name"].replace(" ", "_"))
+                            supabase.table("players").update({"photo_url": photo_url}).eq("id", p["id"]).execute()
+                            clear_caches()
+                            st.success("Photo updated.")
+                            st.rerun()
             with col3:
                 confirm_key = f"confirm_del_player_{p['id']}"
                 if st.session_state.get(confirm_key):
